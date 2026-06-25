@@ -41,74 +41,46 @@ def save_posted(posted_list):
 # ================= ПОЛУЧЕНИЕ ОБОЕВ (С ОТЛАДКОЙ) =================
 
 def get_wallpapers():
-    """Получает вертикальные обои с Unsplash API + отладка"""
+    """Получает вертикальные обои с Unsplash API"""
     
-    # 🔍 Проверка ключа
     if not UNSPLASH_ACCESS_KEY:
         print("❌ КРИТИЧЕСКАЯ ОШИБКА: UNSPLASH_ACCESS_KEY не найден!")
-        print(f"   Значение из env: '{UNSPLASH_ACCESS_KEY}'")
         return []
     
-    print(f"🔑 Ключ Unsplash: {UNSPLASH_ACCESS_KEY[:10]}...")  # Покажем первые 10 символов
+    print(f"🔑 Ключ Unsplash: {UNSPLASH_ACCESS_KEY[:10]}...")
     
-    # 🔍 Простой тестовый запрос (один, без цикла)
+    # 🔍 Простой тестовый запрос
     query = 'wallpaper'
     url = 'https://api.unsplash.com/search/photos'
     
     params = {
         'query': query,
-        'per_page': 5,
+        'per_page': 20,  # Берём больше, чтобы точно найти вертикальные
         'orientation': 'portrait',
         'client_id': UNSPLASH_ACCESS_KEY
     }
     
-    print(f"🔍 Тестовый запрос: {url}")
-    print(f"📦 Параметры: {params}")
+    print(f"🔍 Запрос: {query}")
     
     try:
         response = requests.get(url, params=params, timeout=15)
         
-        # 🔍 Показываем ВСЮ информацию об ответе
-        print(f"📡 Статус код: {response.status_code}")
-        print(f"📡 Заголовки ответа: {dict(response.headers)}")
-        print(f"📡 Тело ответа (первые 500 символов): {response.text[:500]}")
-        
         if response.status_code == 401:
-            print("❌ ОШИБКА 401: Неверный API ключ! Проверьте UNSPLASH_ACCESS_KEY в GitHub Secrets")
-            return []
-        elif response.status_code == 403:
-            print("❌ ОШИБКА 403: Доступ запрещён. Возможно, приложение не одобрено в Unsplash")
-            return []
-        elif response.status_code == 429:
-            print("❌ ОШИБКА 429: Превышен лимит запросов. Подождите 1 час")
+            print("❌ ОШИБКА 401: Неверный API ключ!")
             return []
         elif response.status_code != 200:
-            print(f"❌ Неожиданная ошибка {response.status_code}")
+            print(f"❌ Ошибка API: {response.status_code}")
             return []
         
-        # Парсим JSON
-        try:
-            data = response.json()
-        except json.JSONDecodeError as e:
-            print(f"❌ Не удалось распарсить JSON: {e}")
-            print(f"   Ответ сервера: {response.text}")
-            return []
+        data = response.json()
         
-        # 🔍 Проверяем структуру ответа
-        print(f"📋 Ключи в ответе: {list(data.keys())}")
+        # 🔥 ИСПРАВЛЕНИЕ: Unsplash возвращает 'results', а не 'photos'
+        photos = data.get('results', [])
         
-        if 'errors' in data:
-            print(f"❌ Ошибки от API: {data['errors']}")
-            return []
-        
-        photos = data.get('photos', [])
         print(f"🎨 Найдено фото в ответе: {len(photos)}")
         
         if not photos:
-            print("⚠️ Список photos пуст. Возможные причины:")
-            print("   1. Неверный API ключ")
-            print("   2. Приложение не одобрено (нужно отправить на ревью в Unsplash)")
-            print("   3. Слишком специфичный запрос (попробуйте 'nature', 'sky', 'abstract')")
+            print("⚠️ Список results пуст")
             return []
         
         # Фильтруем вертикальные и собираем данные
@@ -118,9 +90,8 @@ def get_wallpapers():
                 width = photo.get('width', 0)
                 height = photo.get('height', 0)
                 
-                # Проверяем вертикальность
+                # Проверяем вертикальность (height > width)
                 if height <= width:
-                    print(f"⏭️ Пропущено горизонтальное фото: {photo.get('id')}")
                     continue
                 
                 img_info = {
@@ -135,20 +106,16 @@ def get_wallpapers():
                 # Проверка на дубли
                 if img_info['id'] not in [img['id'] for img in all_images]:
                     all_images.append(img_info)
-                    print(f"✅ Добавлено: {img_info['id']} ({width}x{height})")
                     
-            except KeyError as e:
-                print(f"⚠️ Пропущено фото из-за ошибки ключа: {e}")
+            except (KeyError, TypeError) as e:
+                print(f"⚠️ Пропущено фото: {e}")
                 continue
         
         print(f"🎯 Итого вертикальных фото: {len(all_images)}")
         return all_images
         
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Ошибка сети: {e}")
-        return []
     except Exception as e:
-        print(f"❌ Неожиданная ошибка: {type(e).__name__}: {e}")
+        print(f"❌ Ошибка: {type(e).__name__}: {e}")
         return []
 
 # ================= СКАЧИВАНИЕ И ОТПРАВКА =================

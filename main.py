@@ -38,31 +38,24 @@ def save_posted(posted_list):
         json.dump(to_save, f, ensure_ascii=False, indent=2)
     print(f"💾 Сохранено {len(to_save)} записей")
 
-# ================= ПОЛУЧЕНИЕ ОБОЕВ (С ОТЛАДКОЙ) =================
+# ================= ПОЛУЧЕНИЕ ОБОЕВ =================
 
 def get_wallpapers():
-    """Получает вертикальные обои с Unsplash API"""
-    
     if not UNSPLASH_ACCESS_KEY:
-        print("❌ КРИТИЧЕСКАЯ ОШИБКА: UNSPLASH_ACCESS_KEY не найден!")
+        print("❌ UNSPLASH_ACCESS_KEY не найден!")
         return []
     
-    print(f"🔑 Ключ Unsplash: {UNSPLASH_ACCESS_KEY[:10]}...")
-    
-    # 🔍 Простой тестовый запрос
     query = 'wallpaper'
     url = 'https://api.unsplash.com/search/photos'
-    
     params = {
         'query': query,
-        'per_page': 20,  # Берём больше, чтобы точно найти вертикальные
+        'per_page': 20,
         'orientation': 'portrait',
         'client_id': UNSPLASH_ACCESS_KEY
     }
     
-    print(f"🔍 Запрос: {query}")
-    
     try:
+        print(f"🔍 Запрос: {query}")
         response = requests.get(url, params=params, timeout=15)
         
         if response.status_code == 401:
@@ -73,24 +66,19 @@ def get_wallpapers():
             return []
         
         data = response.json()
-        
-        # 🔥 ИСПРАВЛЕНИЕ: Unsplash возвращает 'results', а не 'photos'
         photos = data.get('results', [])
         
-        print(f"🎨 Найдено фото в ответе: {len(photos)}")
+        print(f"🎨 Найдено фото: {len(photos)}")
         
         if not photos:
-            print("⚠️ Список results пуст")
             return []
         
-        # Фильтруем вертикальные и собираем данные
         all_images = []
         for photo in photos:
             try:
                 width = photo.get('width', 0)
                 height = photo.get('height', 0)
                 
-                # Проверяем вертикальность (height > width)
                 if height <= width:
                     continue
                 
@@ -100,25 +88,22 @@ def get_wallpapers():
                     'download_url': photo['urls']['full'],
                     'width': width,
                     'height': height,
-                    'photographer': photo.get('user', {}).get('name', 'Unknown')
                 }
                 
-                # Проверка на дубли
                 if img_info['id'] not in [img['id'] for img in all_images]:
                     all_images.append(img_info)
                     
-            except (KeyError, TypeError) as e:
-                print(f"⚠️ Пропущено фото: {e}")
+            except (KeyError, TypeError):
                 continue
         
-        print(f"🎯 Итого вертикальных фото: {len(all_images)}")
+        print(f"🎯 Вертикальных фото: {len(all_images)}")
         return all_images
         
     except Exception as e:
-        print(f"❌ Ошибка: {type(e).__name__}: {e}")
+        print(f"❌ Ошибка: {e}")
         return []
 
-# ================= СКАЧИВАНИЕ И ОТПРАВКА =================
+# ================= СКАЧИВАНИЕ И ОТПРАВКА АЛЬБОМА =================
 
 def download_image(url):
     try:
@@ -130,46 +115,27 @@ def download_image(url):
     return None
 
 def send_album_to_telegram(images_data, caption):
+    """Отправляет альбом из 5 фото через URL (быстрее и проще)"""
     if len(images_data) < 5:
-        print(f"⚠️ Недостаточно фото для альбома (есть {len(images_data)}, нужно 5)")
+        print(f"⚠️ Недостаточно фото (есть {len(images_data)}, нужно 5)")
         return False
     
     selected_photos = images_data[:5]
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup'
     
+    # Формируем media array с прямыми URL
     media = []
-    downloaded_files = []
-    
     for i, photo_info in enumerate(selected_photos):
-        print(f"📥 Скачиваю фото {i+1}/5...")
-        image_bytes = download_image(photo_info['download_url'])
-        
-        if not image_bytes:
-            print(f"❌ Не удалось скачать фото {i+1}")
-            continue
-        
-        downloaded_files.append(image_bytes)
+        media_item = {
+            'type': 'photo',
+            'media': photo_info['download_url']
+        }
         
         if i == 0:
-            media.append({
-                'type': 'photo',
-                'media': f'attach://photo_{i}.jpg',
-                'caption': caption,
-                'parse_mode': 'HTML'
-            })
-        else:
-            media.append({
-                'type': 'photo',
-                'media': f'attach://photo_{i}.jpg'
-            })
-    
-    if len(downloaded_files) < 5:
-        print(f"⚠️ Скачано только {len(downloaded_files)} из 5 фото")
-        return False
-    
-    files = {}
-    for i, img_bytes in enumerate(downloaded_files):
-        files[f'photo_{i}'] = (f'wallpaper_{i}.jpg', img_bytes, 'image/jpeg')
+            media_item['caption'] = caption
+            media_item['parse_mode'] = 'HTML'
+        
+        media.append(media_item)
     
     data = {
         'chat_id': TELEGRAM_CHAT_ID,
@@ -178,13 +144,14 @@ def send_album_to_telegram(images_data, caption):
     
     try:
         print("📤 Отправляю альбом в Telegram...")
-        response = requests.post(url, files=files, data=data, timeout=60)
+        response = requests.post(url, json=data, timeout=60)
         
         if response.status_code == 200:
             print("✅ Альбом успешно отправлен!")
             return True
         else:
-            print(f"❌ Ошибка отправки: {response.status_code} - {response.text}")
+            print(f"❌ Ошибка отправки: {response.status_code}")
+            print(f"   Ответ: {response.text[:200]}")
             return False
             
     except Exception as e:
@@ -195,15 +162,12 @@ def send_album_to_telegram(images_data, caption):
 
 def main():
     print(f"🚀 Запуск бота - {datetime.now()}")
-    print(f"🔑 TELEGRAM_BOT_TOKEN: {'✅' if TELEGRAM_BOT_TOKEN else '❌'}")
-    print(f"🔑 TELEGRAM_CHAT_ID: {TELEGRAM_CHAT_ID}")
-    print(f"🔑 UNSPLASH_ACCESS_KEY: {'✅' if UNSPLASH_ACCESS_KEY else '❌'}")
     
     posted = load_posted()
     wallpapers = get_wallpapers()
     
     if not wallpapers:
-        print("❌ Не удалось получить обои — см. логи выше")
+        print("❌ Не удалось получить обои")
         return
     
     available = [w for w in wallpapers if w['id'] not in posted]
@@ -214,7 +178,7 @@ def main():
         available = wallpapers
     
     if len(available) < 5:
-        print("❌ Всё равно недостаточно фото для альбома")
+        print("❌ Недостаточно фото для отправки")
         return
     
     print(f"📦 Доступно новых фото: {len(available)}")

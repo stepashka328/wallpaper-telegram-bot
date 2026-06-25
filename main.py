@@ -9,11 +9,9 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 UNSPLASH_ACCESS_KEY = os.getenv('UNSPLASH_ACCESS_KEY')
 
-# Канал: @wallpaperPCe
 CHANNEL_LINK = 'https://t.me/wallpaperPCe'
 FILE_PATH = 'posted.json'
 
-# Описание под альбомом
 CAPTION = f"""📱 Вертикальные обои для телефона
 
 🔗 Канал: <a href="{CHANNEL_LINK}">wallpaperPCe</a>
@@ -22,96 +20,140 @@ CAPTION = f"""📱 Вертикальные обои для телефона
 # ================= ФУНКЦИИ РАБОТЫ С ПАМЯТЬЮ =================
 
 def load_posted():
-    """Загружает список уже опубликованных ID фото"""
     try:
         with open(FILE_PATH, 'r', encoding='utf-8') as f:
             data = json.load(f)
             print(f"📦 Загружено {len(data)} опубликованных фото")
             return data
     except FileNotFoundError:
-        print("📄 Файл posted.json не найден, начинаю с чистого листа")
+        print("📄 Файл posted.json не найден")
         return []
     except json.JSONDecodeError:
-        print("⚠️ Ошибка чтения posted.json, начинаю с чистого листа")
+        print("⚠️ Ошибка чтения posted.json")
         return []
 
 def save_posted(posted_list):
-    """Сохраняет список (только последние 100)"""
     to_save = posted_list[-100:]
     with open(FILE_PATH, 'w', encoding='utf-8') as f:
         json.dump(to_save, f, ensure_ascii=False, indent=2)
-    print(f"💾 Сохранено {len(to_save)} записей в posted.json")
+    print(f"💾 Сохранено {len(to_save)} записей")
 
-# ================= ПОЛУЧЕНИЕ ОБОЕВ С UNSPLASH =================
+# ================= ПОЛУЧЕНИЕ ОБОЕВ (С ОТЛАДКОЙ) =================
 
 def get_wallpapers():
-    """Получает вертикальные обои с Unsplash API"""
+    """Получает вертикальные обои с Unsplash API + отладка"""
+    
+    # 🔍 Проверка ключа
     if not UNSPLASH_ACCESS_KEY:
-        print("❌ Не найден UNSPLASH_ACCESS_KEY в secrets!")
+        print("❌ КРИТИЧЕСКАЯ ОШИБКА: UNSPLASH_ACCESS_KEY не найден!")
+        print(f"   Значение из env: '{UNSPLASH_ACCESS_KEY}'")
         return []
     
-    # Запросы для разнообразия
-    queries = [
-        'phone wallpaper vertical aesthetic',
-        'mobile wallpaper portrait nature',
-        'vertical wallpaper abstract',
-        'phone background minimalist',
-        'vertical landscape wallpaper'
-    ]
+    print(f"🔑 Ключ Unsplash: {UNSPLASH_ACCESS_KEY[:10]}...")  # Покажем первые 10 символов
     
-    all_images = []
+    # 🔍 Простой тестовый запрос (один, без цикла)
+    query = 'wallpaper'
+    url = 'https://api.unsplash.com/search/photos'
     
-    for query in queries:
-        url = 'https://api.unsplash.com/search/photos'
-        params = {
-            'query': query,
-            'per_page': 10,
-            'orientation': 'portrait',  # Только вертикальные!
-            'client_id': UNSPLASH_ACCESS_KEY
-        }
+    params = {
+        'query': query,
+        'per_page': 5,
+        'orientation': 'portrait',
+        'client_id': UNSPLASH_ACCESS_KEY
+    }
+    
+    print(f"🔍 Тестовый запрос: {url}")
+    print(f"📦 Параметры: {params}")
+    
+    try:
+        response = requests.get(url, params=params, timeout=15)
         
+        # 🔍 Показываем ВСЮ информацию об ответе
+        print(f"📡 Статус код: {response.status_code}")
+        print(f"📡 Заголовки ответа: {dict(response.headers)}")
+        print(f"📡 Тело ответа (первые 500 символов): {response.text[:500]}")
+        
+        if response.status_code == 401:
+            print("❌ ОШИБКА 401: Неверный API ключ! Проверьте UNSPLASH_ACCESS_KEY в GitHub Secrets")
+            return []
+        elif response.status_code == 403:
+            print("❌ ОШИБКА 403: Доступ запрещён. Возможно, приложение не одобрено в Unsplash")
+            return []
+        elif response.status_code == 429:
+            print("❌ ОШИБКА 429: Превышен лимит запросов. Подождите 1 час")
+            return []
+        elif response.status_code != 200:
+            print(f"❌ Неожиданная ошибка {response.status_code}")
+            return []
+        
+        # Парсим JSON
         try:
-            print(f"🔍 Запрос к Unsplash: {query}")
-            response = requests.get(url, params=params, timeout=15)
-            
-            if response.status_code == 401:
-                print("❌ Неверный API ключ Unsplash!")
-                return []
-            elif response.status_code != 200:
-                print(f"❌ Ошибка API: {response.status_code}")
-                continue
-                
             data = response.json()
-            photos = data.get('photos', [])
-            
-            for photo in photos:
+        except json.JSONDecodeError as e:
+            print(f"❌ Не удалось распарсить JSON: {e}")
+            print(f"   Ответ сервера: {response.text}")
+            return []
+        
+        # 🔍 Проверяем структуру ответа
+        print(f"📋 Ключи в ответе: {list(data.keys())}")
+        
+        if 'errors' in data:
+            print(f"❌ Ошибки от API: {data['errors']}")
+            return []
+        
+        photos = data.get('photos', [])
+        print(f"🎨 Найдено фото в ответе: {len(photos)}")
+        
+        if not photos:
+            print("⚠️ Список photos пуст. Возможные причины:")
+            print("   1. Неверный API ключ")
+            print("   2. Приложение не одобрено (нужно отправить на ревью в Unsplash)")
+            print("   3. Слишком специфичный запрос (попробуйте 'nature', 'sky', 'abstract')")
+            return []
+        
+        # Фильтруем вертикальные и собираем данные
+        all_images = []
+        for photo in photos:
+            try:
+                width = photo.get('width', 0)
+                height = photo.get('height', 0)
+                
+                # Проверяем вертикальность
+                if height <= width:
+                    print(f"⏭️ Пропущено горизонтальное фото: {photo.get('id')}")
+                    continue
+                
                 img_info = {
                     'id': photo['id'],
-                    'url': photo['urls']['regular'],  # Хорошее качество
-                    'download_url': photo['urls']['full'],  # Максимальное
-                    'width': photo['width'],
-                    'height': photo['height'],
-                    'photographer': photo['user']['name']
+                    'url': photo['urls']['regular'],
+                    'download_url': photo['urls']['full'],
+                    'width': width,
+                    'height': height,
+                    'photographer': photo.get('user', {}).get('name', 'Unknown')
                 }
                 
-                # Проверяем, что фото действительно вертикальное
-                if img_info['height'] > img_info['width']:
-                    if img_info['id'] not in [img['id'] for img in all_images]:
-                        all_images.append(img_info)
-            
-            print(f"✅ Найдено {len(photos)} фото по запросу '{query}'")
-            
-        except Exception as e:
-            print(f"❌ Ошибка при запросе '{query}': {e}")
-            continue
-    
-    print(f"🎨 Всего найдено уникальных фото: {len(all_images)}")
-    return all_images
+                # Проверка на дубли
+                if img_info['id'] not in [img['id'] for img in all_images]:
+                    all_images.append(img_info)
+                    print(f"✅ Добавлено: {img_info['id']} ({width}x{height})")
+                    
+            except KeyError as e:
+                print(f"⚠️ Пропущено фото из-за ошибки ключа: {e}")
+                continue
+        
+        print(f"🎯 Итого вертикальных фото: {len(all_images)}")
+        return all_images
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Ошибка сети: {e}")
+        return []
+    except Exception as e:
+        print(f"❌ Неожиданная ошибка: {type(e).__name__}: {e}")
+        return []
 
 # ================= СКАЧИВАНИЕ И ОТПРАВКА =================
 
 def download_image(url):
-    """Скачивает изображение в память"""
     try:
         response = requests.get(url, timeout=20)
         if response.status_code == 200:
@@ -121,17 +163,13 @@ def download_image(url):
     return None
 
 def send_album_to_telegram(images_data, caption):
-    """Отправляет альбом из 5 фото в Telegram"""
     if len(images_data) < 5:
         print(f"⚠️ Недостаточно фото для альбома (есть {len(images_data)}, нужно 5)")
         return False
     
-    # Берем первые 5 фото
     selected_photos = images_data[:5]
-    
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup'
     
-    # Формируем медиа-группу
     media = []
     downloaded_files = []
     
@@ -145,7 +183,6 @@ def send_album_to_telegram(images_data, caption):
         
         downloaded_files.append(image_bytes)
         
-        # Первое фото получает caption, остальные - без
         if i == 0:
             media.append({
                 'type': 'photo',
@@ -163,7 +200,6 @@ def send_album_to_telegram(images_data, caption):
         print(f"⚠️ Скачано только {len(downloaded_files)} из 5 фото")
         return False
     
-    # Готовим файлы для отправки
     files = {}
     for i, img_bytes in enumerate(downloaded_files):
         files[f'photo_{i}'] = (f'wallpaper_{i}.jpg', img_bytes, 'image/jpeg')
@@ -191,19 +227,18 @@ def send_album_to_telegram(images_data, caption):
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    print(f"🚀 Запуск бота для обоев - {datetime.now()}")
+    print(f"🚀 Запуск бота - {datetime.now()}")
+    print(f"🔑 TELEGRAM_BOT_TOKEN: {'✅' if TELEGRAM_BOT_TOKEN else '❌'}")
+    print(f"🔑 TELEGRAM_CHAT_ID: {TELEGRAM_CHAT_ID}")
+    print(f"🔑 UNSPLASH_ACCESS_KEY: {'✅' if UNSPLASH_ACCESS_KEY else '❌'}")
     
-    # Загружаем историю
     posted = load_posted()
-    
-    # Получаем обои
     wallpapers = get_wallpapers()
     
     if not wallpapers:
-        print("❌ Не удалось получить обои")
+        print("❌ Не удалось получить обои — см. логи выше")
         return
     
-    # Фильтруем уже опубликованные
     available = [w for w in wallpapers if w['id'] not in posted]
     
     if len(available) < 5:
@@ -217,9 +252,7 @@ def main():
     
     print(f"📦 Доступно новых фото: {len(available)}")
     
-    # Отправляем альбом
     if send_album_to_telegram(available, CAPTION):
-        # Сохраняем ID опубликованных фото
         for photo in available[:5]:
             posted.append(photo['id'])
         save_posted(posted)

@@ -69,7 +69,6 @@ def get_wallpapers():
         photos = data.get('results', [])
         
         print(f"🎨 Найдено фото: {len(photos)}")
-        
         if not photos:
             return []
         
@@ -79,13 +78,14 @@ def get_wallpapers():
                 width = photo.get('width', 0)
                 height = photo.get('height', 0)
                 
+                # Только вертикальные
                 if height <= width:
                     continue
                 
+                # ✅ Используем 'regular' (1080px) - быстрее грузится, идеально для телефонов
                 img_info = {
                     'id': photo['id'],
                     'url': photo['urls']['regular'],
-                    'download_url': photo['urls']['full'],
                     'width': width,
                     'height': height,
                 }
@@ -96,14 +96,14 @@ def get_wallpapers():
             except (KeyError, TypeError):
                 continue
         
-        print(f"🎯 Вертикальных фото: {len(all_images)}")
+        print(f" Вертикальных фото: {len(all_images)}")
         return all_images
         
     except Exception as e:
         print(f"❌ Ошибка: {e}")
         return []
 
-# ================= СКАЧИВАНИЕ И ОТПРАВКА АЛЬБОМА =================
+# ================= СКАЧИВАНИЕ И ОТПРАВКА АЛЬБОМА (ИСПРАВЛЕНО) =================
 
 def download_image(url):
     try:
@@ -115,53 +115,62 @@ def download_image(url):
     return None
 
 def send_album_to_telegram(images_data, caption):
-    """Отправляет альбом из 5 фото через URL (быстрее и проще)"""
+    """Отправляет альбом из 5 фото через скачивание и attach:// (надёжно)"""
     if len(images_data) < 5:
         print(f"⚠️ Недостаточно фото (есть {len(images_data)}, нужно 5)")
         return False
     
-    selected_photos = images_data[:5]
+    selected = images_data[:5]
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup'
     
-    # Формируем media array с прямыми URL
+    # 1️⃣ Скачиваем все 5 фото
+    downloaded = []
+    for i, img_info in enumerate(selected):
+        print(f"📥 Скачиваю фото {i+1}/5...")
+        img_bytes = download_image(img_info['url'])
+        if not img_bytes:
+            print(f" Не удалось скачать фото {i+1}")
+            return False
+        downloaded.append(img_bytes)
+    
+    # 2️⃣ Формируем media array для Telegram API
     media = []
-    for i, photo_info in enumerate(selected_photos):
-        media_item = {
-            'type': 'photo',
-            'media': photo_info['download_url']
-        }
-        
+    for i in range(5):
+        item = {"type": "photo", "media": f"attach://file{i}"}
         if i == 0:
-            media_item['caption'] = caption
-            media_item['parse_mode'] = 'HTML'
-        
-        media.append(media_item)
+            item["caption"] = caption
+            item["parse_mode"] = "HTML"
+        media.append(item)
     
-    data = {
-        'chat_id': TELEGRAM_CHAT_ID,
-        'media': json.dumps(media)
+    # 3️⃣ Готовим multipart/form-data
+    # chat_id и media отправляются как текстовые поля, файлы - как бинарные
+    files = {
+        "chat_id": (None, TELEGRAM_CHAT_ID),
+        "media": (None, json.dumps(media, ensure_ascii=False))
     }
+    for i, img_bytes in enumerate(downloaded):
+        files[f"file{i}"] = (f"wallpaper_{i}.jpg", img_bytes, "image/jpeg")
     
+    # 4️ Отправляем
     try:
         print("📤 Отправляю альбом в Telegram...")
-        response = requests.post(url, json=data, timeout=60)
+        response = requests.post(url, files=files, timeout=60)
         
         if response.status_code == 200:
             print("✅ Альбом успешно отправлен!")
             return True
         else:
-            print(f"❌ Ошибка отправки: {response.status_code}")
-            print(f"   Ответ: {response.text[:200]}")
+            print(f"❌ Ошибка {response.status_code}: {response.text[:200]}")
             return False
             
     except Exception as e:
-        print(f"❌ Ошибка при отправке: {e}")
+        print(f"❌ Исключение при отправке: {e}")
         return False
 
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    print(f"🚀 Запуск бота - {datetime.now()}")
+    print(f" Запуск бота - {datetime.now()}")
     
     posted = load_posted()
     wallpapers = get_wallpapers()

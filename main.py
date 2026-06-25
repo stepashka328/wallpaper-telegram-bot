@@ -82,10 +82,10 @@ def get_wallpapers():
                 if height <= width:
                     continue
                 
-                # ✅ Используем 'regular' (1080px) - быстрее грузится, идеально для телефонов
                 img_info = {
                     'id': photo['id'],
-                    'url': photo['urls']['regular'],
+                    'url': photo['urls']['regular'],  # Для превью (1080px)
+                    'download_url': photo['urls']['full'],  # Оригинал (макс. качество)
                     'width': width,
                     'height': height,
                 }
@@ -96,18 +96,18 @@ def get_wallpapers():
             except (KeyError, TypeError):
                 continue
         
-        print(f" Вертикальных фото: {len(all_images)}")
+        print(f"🎯 Вертикальных фото: {len(all_images)}")
         return all_images
         
     except Exception as e:
         print(f"❌ Ошибка: {e}")
         return []
 
-# ================= СКАЧИВАНИЕ И ОТПРАВКА АЛЬБОМА (ИСПРАВЛЕНО) =================
+# ================= СКАЧИВАНИЕ И ОТПРАВКА =================
 
 def download_image(url):
     try:
-        response = requests.get(url, timeout=20)
+        response = requests.get(url, timeout=30)  # Увеличил таймаут для больших файлов
         if response.status_code == 200:
             return response.content
     except Exception as e:
@@ -115,7 +115,7 @@ def download_image(url):
     return None
 
 def send_album_to_telegram(images_data, caption):
-    """Отправляет альбом из 5 фото через скачивание и attach:// (надёжно)"""
+    """Отправляет альбом из 5 фото (сжатое качество для превью)"""
     if len(images_data) < 5:
         print(f"⚠️ Недостаточно фото (есть {len(images_data)}, нужно 5)")
         return False
@@ -123,17 +123,17 @@ def send_album_to_telegram(images_data, caption):
     selected = images_data[:5]
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup'
     
-    # 1️⃣ Скачиваем все 5 фото
+    # Скачиваем фото (regular качество)
     downloaded = []
     for i, img_info in enumerate(selected):
-        print(f"📥 Скачиваю фото {i+1}/5...")
-        img_bytes = download_image(img_info['url'])
+        print(f"📥 Скачиваю превью {i+1}/5...")
+        img_bytes = download_image(img_info['url'])  # Regular quality
         if not img_bytes:
-            print(f" Не удалось скачать фото {i+1}")
+            print(f"❌ Не удалось скачать превью {i+1}")
             return False
         downloaded.append(img_bytes)
     
-    # 2️⃣ Формируем media array для Telegram API
+    # Формируем media array
     media = []
     for i in range(5):
         item = {"type": "photo", "media": f"attach://file{i}"}
@@ -142,8 +142,7 @@ def send_album_to_telegram(images_data, caption):
             item["parse_mode"] = "HTML"
         media.append(item)
     
-    # 3️⃣ Готовим multipart/form-data
-    # chat_id и media отправляются как текстовые поля, файлы - как бинарные
+    # Готовим multipart/form-data
     files = {
         "chat_id": (None, TELEGRAM_CHAT_ID),
         "media": (None, json.dumps(media, ensure_ascii=False))
@@ -151,13 +150,12 @@ def send_album_to_telegram(images_data, caption):
     for i, img_bytes in enumerate(downloaded):
         files[f"file{i}"] = (f"wallpaper_{i}.jpg", img_bytes, "image/jpeg")
     
-    # 4️ Отправляем
     try:
-        print("📤 Отправляю альбом в Telegram...")
+        print("📤 Отправляю альбом (превью)...")
         response = requests.post(url, files=files, timeout=60)
         
         if response.status_code == 200:
-            print("✅ Альбом успешно отправлен!")
+            print("✅ Альбом отправлен!")
             return True
         else:
             print(f"❌ Ошибка {response.status_code}: {response.text[:200]}")
@@ -167,10 +165,50 @@ def send_album_to_telegram(images_data, caption):
         print(f"❌ Исключение при отправке: {e}")
         return False
 
+def send_original_files(images_data):
+    """Отправляет оригиналы фото как документы (без сжатия)"""
+    print("\n📦 Отправляю оригиналы в максимальном качестве...")
+    
+    selected = images_data[:5]
+    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument'
+    
+    for i, img_info in enumerate(selected):
+        print(f"📥 Скачиваю оригинал {i+1}/5...")
+        img_bytes = download_image(img_info['download_url'])  # Full quality
+        
+        if not img_bytes:
+            print(f"⚠️ Не удалось скачать оригинал {i+1}, пропускаю")
+            continue
+        
+        # Отправляем как документ (без сжатия)
+        files = {
+            'document': (f'wallpaper_original_{i+1}.jpg', img_bytes, 'image/jpeg'),
+            'chat_id': (None, TELEGRAM_CHAT_ID),
+            'caption': (None, f'📸 Оригинал #{i+1}\nРазмер: {img_info["width"]}x{img_info["height"]}')
+        }
+        
+        try:
+            print(f"📤 Отправляю документ {i+1}/5...")
+            response = requests.post(url, files=files, timeout=60)
+            
+            if response.status_code == 200:
+                print(f"✅ Оригинал {i+1} отправлен")
+            else:
+                print(f"⚠️ Ошибка при отправке оригинала {i+1}: {response.status_code}")
+            
+            # Пауза между отправками (чтобы Telegram не спамил)
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"❌ Ошибка отправки документа {i+1}: {e}")
+    
+    print("✨ Отправка оригиналов завершена!\n")
+    return True
+
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    print(f" Запуск бота - {datetime.now()}")
+    print(f"🚀 Запуск бота - {datetime.now()}")
     
     posted = load_posted()
     wallpapers = get_wallpapers()
@@ -192,11 +230,17 @@ def main():
     
     print(f"📦 Доступно новых фото: {len(available)}")
     
+    # 1️⃣ Отправляем альбом (превью)
     if send_album_to_telegram(available, CAPTION):
+        # 2️⃣ Отправляем оригиналы как документы
+        send_original_files(available)
+        
+        # 3️⃣ Сохраняем в историю
         for photo in available[:5]:
             posted.append(photo['id'])
         save_posted(posted)
-        print("🎉 Готово!")
+        
+        print("🎉 Готово! Альбом + оригиналы отправлены!")
     else:
         print("❌ Не удалось отправить альбом")
 

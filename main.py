@@ -57,68 +57,92 @@ def save_posted(posted_list):
 # ================= ПОЛУЧЕНИЕ ОБОЕВ =================
 
 def get_wallpapers():
+    """Получает вертикальные обои с Unsplash API + рандомизация"""
     if not UNSPLASH_ACCESS_KEY:
         print("❌ UNSPLASH_ACCESS_KEY не найден!")
         return []
     
-    query = 'wallpaper'
-    url = 'https://api.unsplash.com/search/photos'
-    params = {
-        'query': query,
-        'per_page': 30,  # Увеличили для большего выбора
-        'orientation': 'portrait',
-        'client_id': UNSPLASH_ACCESS_KEY
-    }
+    # 🔥 Разнообразные запросы для большего охвата
+    queries = [
+        'wallpaper phone vertical',
+        'aesthetic wallpaper portrait',
+        'minimalist phone background',
+        'nature wallpaper mobile',
+        'abstract vertical background',
+        'dark aesthetic wallpaper',
+        'colorful phone wallpaper',
+        'gradient background portrait',
+    ]
     
-    try:
-        print(f"🔍 Запрос: {query}")
-        response = requests.get(url, params=params, timeout=15)
+    all_images = []
+    seen_ids = set()
+    
+    for query in queries:
+        url = 'https://api.unsplash.com/search/photos'
+        params = {
+            'query': query,
+            'per_page': 30,
+            'orientation': 'portrait',
+            'client_id': UNSPLASH_ACCESS_KEY,
+            # 🔥 Добавляем случайную страницу для разнообразия
+            'page': random.randint(1, 5)
+        }
         
-        if response.status_code == 401:
-            print("❌ ОШИБКА 401: Неверный API ключ!")
-            return []
-        elif response.status_code != 200:
-            print(f"❌ Ошибка API: {response.status_code}")
-            return []
-        
-        data = response.json()
-        photos = data.get('results', [])
-        
-        print(f"🎨 Найдено фото: {len(photos)}")
-        if not photos:
-            return []
-        
-        all_images = []
-        for photo in photos:
-            try:
-                width = photo.get('width', 0)
-                height = photo.get('height', 0)
-                
-                if height <= width:  # Только вертикальные
-                    continue
-                
-                img_info = {
-                    'id': str(photo['id']),  # ✅ Гарантируем строковый тип для сравнения
-                    'url': photo['urls']['regular'],
-                    'download_url': photo['urls']['full'],
-                    'width': width,
-                    'height': height,
-                }
-                
-                # Проверка на дубли внутри текущего запроса
-                if img_info['id'] not in [img['id'] for img in all_images]:
+        try:
+            print(f"🔍 Запрос: '{query}' (стр. {params['page']})")
+            response = requests.get(url, params=params, timeout=15)
+            
+            if response.status_code == 401:
+                print("❌ ОШИБКА 401: Неверный API ключ!")
+                return []
+            elif response.status_code != 200:
+                print(f"⚠️ Ошибка {response.status_code} для '{query}', пропускаю")
+                continue
+            
+            data = response.json()
+            photos = data.get('results', [])
+            
+            for photo in photos:
+                try:
+                    width = photo.get('width', 0)
+                    height = photo.get('height', 0)
+                    
+                    if height <= width:  # Только вертикальные
+                        continue
+                    
+                    img_id = str(photo['id'])
+                    
+                    # Пропускаем уже увиденные в этом запуске
+                    if img_id in seen_ids:
+                        continue
+                    
+                    img_info = {
+                        'id': img_id,
+                        'url': photo['urls']['regular'],
+                        'download_url': photo['urls']['full'],
+                        'width': width,
+                        'height': height,
+                    }
+                    
+                    seen_ids.add(img_id)
                     all_images.append(img_info)
                     
-            except (KeyError, TypeError) as e:
-                print(f"⚠️ Пропущено фото: {e}")
-                continue
+                except (KeyError, TypeError):
+                    continue
+                    
+        except Exception as e:
+            print(f"⚠️ Ошибка при запросе '{query}': {e}")
+            continue
         
-        print(f"🎯 Вертикальных фото: {len(all_images)}")
-        return all_images
-        
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        return []
+        # Если набрали достаточно — можно остановиться
+        if len(all_images) >= 20:
+            break
+    
+    # 🔥 Перемешиваем результаты, чтобы не брать всегда одни и те же
+    random.shuffle(all_images)
+    
+    print(f"🎯 Всего уникальных вертикальных фото: {len(all_images)}")
+    return all_images
 
 # ================= СКАЧИВАНИЕ И ОТПРАВКА =================
 

@@ -41,9 +41,7 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           
-          # 🔥 Пытаемся подтянуть изменения (на случай параллельных запусков)
-          git pull --rebase origin main || echo "⚠️ Не удалось сделать pull"
-          
           git add posted.json
-          git diff --cached --exit-code || git commit -m "💾 Update posted wallpapers [skip ci]"
-          git push || echo "⚠️ Не удалось сделать push"
+          # Коммитим только если есть изменения
+          git diff --cached --quiet || git commit -m "💾 Update posted wallpapers [skip ci]"
+          git push || true  # Игнорируем ошибки push (на случай конфликта)

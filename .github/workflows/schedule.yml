@@ -10,6 +10,11 @@ on:
 permissions:
   contents: write
 
+# Не даём двум запускам работать одновременно (иначе история перезатирается)
+concurrency:
+  group: post-wallpapers
+  cancel-in-progress: false
+
 jobs:
   post-wallpapers:
     runs-on: ubuntu-latest
@@ -44,4 +49,9 @@ jobs:
           git add posted.json
           # Коммитим только если есть изменения
           git diff --cached --quiet || git commit -m "💾 Update posted wallpapers [skip ci]"
-          git push || true  # Игнорируем ошибки push (на случай конфликта)
+          # Подтягиваем свежую версию и пушим, до 3 попыток
+          for i in 1 2 3; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "Push не удался, попытка $i"; sleep 5
+          done
+          echo "❌ Не удалось сохранить posted.json"; exit 1

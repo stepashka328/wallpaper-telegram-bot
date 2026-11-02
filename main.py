@@ -43,7 +43,7 @@ def load_posted():
 
 def save_posted(posted_list):
     """Сохраняет список с подтверждением"""
-    to_save = posted_list[-100:]  # Храним последние 100
+    to_save = list(dict.fromkeys(posted_list))  # Храним ВСЮ историю, без дублей
     try:
         with open(FILE_PATH, 'w', encoding='utf-8') as f:
             json.dump(to_save, f, ensure_ascii=False, indent=2)
@@ -57,13 +57,13 @@ def save_posted(posted_list):
 
 # ================= ПОЛУЧЕНИЕ ОБОЕВ =================
 
-def get_wallpapers():
-    """Получает вертикальные обои с Unsplash API + рандомизация"""
+def get_wallpapers(posted_ids, need=5):
+    """Берёт случайные вертикальные фото с Unsplash (/photos/random),
+    пока не наберёт `need` штук, которых ещё не было в канале."""
     if not UNSPLASH_ACCESS_KEY:
         print("❌ UNSPLASH_ACCESS_KEY не найден!")
         return []
-    
-    # 🔥 Разнообразные запросы для большего охвата
+
     queries = [
         'wallpaper phone vertical',
         'aesthetic wallpaper portrait',
@@ -74,76 +74,61 @@ def get_wallpapers():
         'colorful phone wallpaper',
         'gradient background portrait',
     ]
-    
-    all_images = []
-    seen_ids = set()
-    
+    random.shuffle(queries)  # каждый запуск — свой порядок запросов
+
+    found = []
+    seen_ids = set(posted_ids)
+
     for query in queries:
-        url = 'https://api.unsplash.com/search/photos'
         params = {
             'query': query,
-            'per_page': 30,
+            'count': 30,               # максимум для /photos/random
             'orientation': 'portrait',
+            'content_filter': 'high',
             'client_id': UNSPLASH_ACCESS_KEY,
-            # 🔥 Добавляем случайную страницу для разнообразия
-            'page': random.randint(1, 5)
         }
-        
         try:
-            print(f"🔍 Запрос: '{query}' (стр. {params['page']})")
-            response = requests.get(url, params=params, timeout=15)
-            
+            print(f"🎲 Случайные фото по запросу: '{query}'")
+            response = requests.get('https://api.unsplash.com/photos/random',
+                                    params=params, timeout=15)
+
             if response.status_code == 401:
                 print("❌ ОШИБКА 401: Неверный API ключ!")
                 return []
-            elif response.status_code != 200:
+            if response.status_code == 403:
+                print("⚠️ Лимит запросов Unsplash исчерпан")
+                break
+            if response.status_code != 200:
                 print(f"⚠️ Ошибка {response.status_code} для '{query}', пропускаю")
                 continue
-            
-            data = response.json()
-            photos = data.get('results', [])
-            
-            for photo in photos:
+
+            for photo in response.json():
                 try:
+                    img_id = str(photo['id'])
                     width = photo.get('width', 0)
                     height = photo.get('height', 0)
-                    
-                    if height <= width:  # Только вертикальные
+                    if height <= width or img_id in seen_ids:
                         continue
-                    
-                    img_id = str(photo['id'])
-                    
-                    # Пропускаем уже увиденные в этом запуске
-                    if img_id in seen_ids:
-                        continue
-                    
-                    img_info = {
+                    seen_ids.add(img_id)
+                    found.append({
                         'id': img_id,
                         'url': photo['urls']['regular'],
                         'download_url': photo['urls']['full'],
                         'width': width,
                         'height': height,
-                    }
-                    
-                    seen_ids.add(img_id)
-                    all_images.append(img_info)
-                    
+                    })
                 except (KeyError, TypeError):
                     continue
-                    
         except Exception as e:
             print(f"⚠️ Ошибка при запросе '{query}': {e}")
             continue
-        
-        # Если набрали достаточно — можно остановиться
-        if len(all_images) >= 20:
+
+        if len(found) >= need:
             break
-    
-    # 🔥 Перемешиваем результаты, чтобы не брать всегда одни и те же
-    random.shuffle(all_images)
-    
-    print(f"🎯 Всего уникальных вертикальных фото: {len(all_images)}")
-    return all_images
+
+    random.shuffle(found)
+    print(f"🎯 Новых вертикальных фото: {len(found)}")
+    return found
 
 # ================= СКАЧИВАНИЕ И ОТПРАВКА =================
 
@@ -245,26 +230,13 @@ def main():
     # 🔹 Загружаем историю
     posted = load_posted()
     
-    # 🔹 Получаем обои
-    wallpapers = get_wallpapers()
-    if not wallpapers:
-        print("❌ Не удалось получить обои")
-        return
-    
-    # 🔹 Фильтруем уже опубликованные (с отладкой)
-    print(f"🔍 Проверяю дубликаты...")
-    available = [w for w in wallpapers if w['id'] not in posted]
-    print(f"✅ Найдено {len(available)} новых фото из {len(wallpapers)}")
-    
+    # 🔹 Получаем только новые обои (фильтр по истории внутри)
+    available = get_wallpapers(posted, need=5)
+
     if len(available) < 5:
-        print(f"⚠️ Недостаточно новых фото ({len(available)}), очищаю историю")
-        posted = []
-        available = wallpapers
-    
-    if len(available) < 5:
-        print("❌ Недостаточно фото для отправки")
+        print(f"❌ Новых фото меньше 5 ({len(available)}), пропускаю этот запуск")
         return
-    
+
     print(f"📦 Отправляю 5 фото из {len(available)} доступных")
     
     # 🔹 Отправляем альбом
